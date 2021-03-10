@@ -136,3 +136,9 @@ void handle_command_line_arguments(int argc, char **argv, int *root, int *hide_p
         exit(1);
     }
 }
+
+void write_buffer(char **dest_ptr, char *src, size_t size)
+{
+    memcpy(*dest_ptr, src, size);
+    *dest_ptr += size;
+}
