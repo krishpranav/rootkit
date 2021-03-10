@@ -6,5 +6,6 @@
 #define CFG_HIDE_FILE "hide_file"
 #define CFG_UNHIDE_FILE "unhide_file"
 #define CFG_HIDE "hide"
+#define CFG_UNHIDE "unhide"
 #define CFG_PROTECT "protect"
 #define CFG_UNPROTECT "unprotect"

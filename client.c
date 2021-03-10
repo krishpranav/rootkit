@@ -1,3 +1,5 @@
+// a simple client side file for rootkit
+
 //imports
 #include <stdio.h>
 #include <stdlib.h>
@@ -185,7 +187,7 @@ int main(int argc, char **argv)
         buf_size += sizeof(CFG_UNPROTECT);
     }
 
-    buf_size += 1; // for null terminator
+    buf_size += 1; // for null terminal
 
     char *buf = malloc(buf_size);
     buf[buf_size - 1] = 0;
