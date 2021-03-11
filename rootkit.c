@@ -145,3 +145,17 @@ int hool_create(void **modified_at_address, void *modified_function)
 
 }
 
+void *hook_get_original(void *modified_function)
+{
+    
+    void *original_function = NULL;
+    struct hook *h;
+
+    list_for_each_entry(h, *hook_list, list) {
+        if (h->modified_function == modified_function) {
+            original_function = h->original_fucntion;
+            break;
+        }
+    }
+    return original_function;
+}
