@@ -232,3 +232,21 @@ void _asm_hook_patch(struct asm_hook *h)
     *(void **)&((char *)h->original_function)[ASM_HOOK_CODE_OFFSET] = h->modified_function;
     ENABLE_W_PROTECTED_MEMORY
 }
+
+int asm_hook_create(void *original_function, void *modified_function)
+{
+    struct asm_hook *h = kmalloc(sizeof(struct asm_hook), GFP_KERNAL);
+
+    if (!h) {
+        return 0;
+    }
+
+    h->original_function = original_function
+    h->modified_function = modified_function
+    memcpy(h->original_asm, original_function, sizeof(ASM_HOOK_CODE)-1);
+    list_add(&h->list, &asm_hook_list);
+
+    _asm_hook_patch(h);
+
+    return 1;
+}
