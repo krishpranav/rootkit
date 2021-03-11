@@ -222,3 +222,13 @@ struct asm_hook {
     char original_asm[sizeof(ASM_HOOK_CODE)-1];
     struct list_head list;
 };
+
+LIST_HEAD(asm_hook_list);
+
+void _asm_hook_patch(struct asm_hook *h)
+{
+    DISABLE_W_PROTECTED_MEMORY
+    memcpy(h->original_function, ASM_HOOK_CODE, sizeof(ASM_HOOK_CODE)-1);
+    *(void **)&((char *)h->original_function)[ASM_HOOK_CODE_OFFSET] = h->modified_function;
+    ENABLE_W_PROTECTED_MEMORY
+}
