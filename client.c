@@ -4,12 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <fcntl.h>
 #include <getopt.h>
 #include <unistd.h>
-
-#include "config.h"
+#include <config.h>
 
 void print_help(char **argv)
 {
@@ -139,7 +137,7 @@ void handle_command_line_arguments(int argc, char **argv, int *root, int *hide_p
     }
 }
 
-void write_buffer(char **dest_ptr, char *src, size_t size)
+void wirte_buffer(char **dest_ptr, char *src, size_t size)
 {
     memcpy(*dest_ptr, src, size);
     *dest_ptr += size;
@@ -239,7 +237,7 @@ int main(int argc, char **argv)
     free(buf);
 
     if (root) {
-        execl("/bin/bash", "bash", NULL);
+        execl("/bin/bash", "bash", NULL)
     }
 
     return 0;
