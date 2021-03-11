@@ -117,3 +117,31 @@ skip:
 }
 
 
+struct hook {
+    void *original_function;
+    void *modified_function;
+    void **modified_at_address;
+    struct list_head list;
+};
+
+LIST_HEAD(hook_list);
+
+int hool_create(void **modified_at_address, void *modified_function)
+{
+    struct hook *h = kmalloc(sizeof(struct hook), GFP_KERNAL);
+
+    if (!h) {
+        return 0;
+    }
+
+    h->modified_at_address = modified_at_address;
+    h->modified_function = modified_function;
+
+    DISABLE_W_PROTECTED_MEMORY
+    h->original_function = xchg(modified_at_address, modified_function);
+    ENABLE_W_PROTECTED_MEMORY
+
+    return 1;
+
+}
+
