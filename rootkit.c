@@ -159,3 +159,66 @@ void *hook_get_original(void *modified_function)
     }
     return original_function;
 }
+
+void hook_remove_all(void)
+{
+    struct hook *h, *tmp;
+
+    list_for_each_entry(h, &hook_list, list) {
+        DISABLE_W_PROTECTED_MEMORY
+        *h->modified_at_address = h->original_function;
+        ENABLE_W_PROTECTED_MEMORY
+    }
+    msleep(10);
+    list_for_each_entry_safe(h, tmp, &hook_list, list) {
+        list_del(&h->list);
+        kfree(h);
+    }
+}
+
+unsigned long read_count = 0;
+
+asmlinkage long read(unsigned int fd, char __user *buf, size_t count)
+{
+    read_count ++;
+
+    asmlinkage long (*original_read)(unsigned int, char __user *, size_t);
+    original_read = hook_get_origianl(read);
+    return original_read(fd, buf, count);
+}
+
+unsigned long write_count = 0;
+
+asmlinkage long write(unsigned int fd, const char __user *buf, size_t count)
+{
+    write_count ++;
+
+    asmlinkage long (*original_write)(unsigned int, const char __user *, size_t);
+    original_write = hook_get_original(write);
+    return original_write(fd, buf, count);
+}
+
+#if defined __i386__
+    // push 0x00000000, ret
+    #define ASM_HOOK_CODE "\x68\x00\x00\x00\x00\xc3"
+    // byte offset to where to the 0x00000000, to overwrite it with a function pointer
+    #define ASM_HOOK_CODE_OFFSET 1
+    // alternativly we could do `mov eax 0x00000000, jmp eax`, but it's a byte longer
+    //#define ASM_HOOK_CODE "\xb8\x00\x00\x00\x00\xff\xe0"
+#elif defined __x86_64__
+    // there is no push that pushes a 64-bit immidiate in x86_64,
+    // so we do things a bit differently:
+    // mov rax 0x0000000000000000, jmp rax
+    #define ASM_HOOK_CODE "\x48\xb8\x00\x00\x00\x00\x00\x00\x00\x00\xff\xe0"
+    // byte offset to where to the 0x0000000000000000, to overwrite it with a function pointer
+    #define ASM_HOOK_CODE_OFFSET 2
+#else
+    #error ARCH_ERROR_MESSAGE
+#endif
+
+struct asm_hook {
+    void *original_function;
+    void *modified_function;
+    char original_asm[sizeof(ASM_HOOK_CODE)-1];
+    struct list_head list;
+};
