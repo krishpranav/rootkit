@@ -83,3 +83,35 @@ MODULE_AUTHOR("krishpraanv")
 #endif
 
 void **sys_call_table;
+
+ 
+
+void **find_syscall_table(void)
+{
+    void **sctable;
+    void *i = (void*) START_ADDRESS;
+
+    while (i < END_ADDRESS) {
+        sctable = (void **) i;
+
+        // sadly only sys_close seems to be exported -- we can't check against more system calls
+        if (sctable[__NR_close] == (void *) sys_close) {
+            size_t j;
+            // we expect there to be at least 300 system calls
+            const unsigned int SYS_CALL_NUM = 300;
+            // sanity check: no function pointer in the system call table should be NULL
+            for (j = 0; j < SYS_CALL_NUM; j ++) {
+                if (sctable[j] == NULL) {
+                    // this is not a system call table
+                    goto skip;
+                }
+            }
+            return sctable;
+        }
+skip:
+        ;
+        i += sizeof(void *);
+    }
+
+    return NULL;
+}
