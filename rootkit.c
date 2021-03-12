@@ -248,5 +248,26 @@ int asm_hook_create(void *original_function, void *modified_function)
 
     _asm_hook_patch(h);
 
-    return 1;
+    return 1; 
 }
+
+void asm_hook_patch(void *modified_function)
+{
+
+    struct asm_hook *h;
+
+    list_for_each_entry(h, &asm_hook_list, list) {
+        if (h->modified_function == modified_function) {
+            _asm_hook_patch(h);
+            break;
+        }
+    }
+}
+
+void _asm_hook_unpatch(struct asm_hook *h)
+{
+    DISABLE_W_PROTECTED_MEMORY
+    memcpy(h->original_fucntion, h->original_function, sizeof(ASM_HOOK_CODE)-1);
+    ENABLE_W_PROTECTED_MEMORY
+}
+
