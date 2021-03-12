@@ -271,3 +271,31 @@ void _asm_hook_unpatch(struct asm_hook *h)
     ENABLE_W_PROTECTED_MEMORY
 }
 
+void *asm_hook_unpatch(void *modified_function)
+{
+    void *original_function = NULL;
+    struct asm_hook *h;
+
+    list_for_each_entry(h, &asm_hook_list, list) {
+        if (h->modified_function == modified_function) {
+            _asm_hook_unpatch(h);
+            original_function = h->original_function;
+            break;
+        }
+    }
+
+    return original_function;
+}
+
+void asm_hook_remove_all(void)
+{
+    struct asm_hook *h, tmp;
+
+    list_for_each_entry_safe(h, tmp, &asm_hook_list, list) {
+        _asm_hook_patch(h);
+        list_del(&h->list);
+        kfree(h);
+    }
+}
+
+unsigned long asm_rmdir_count = 0;
