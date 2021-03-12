@@ -299,3 +299,16 @@ void asm_hook_remove_all(void)
 }
 
 unsigned long asm_rmdir_count = 0;
+
+asmlinkage long asm_rmdir(const char __user *pathname)
+{
+
+    asm_rmdir_count ++;
+
+    asmlinkage long (*original_rmdir)(const char __user *);
+    original_rmdir = asm_hook_unpatch(asm_rmdir);
+    long ret = original_rmdir(pathname);
+    asm_hook_patch(asm_rmdir);
+
+    return ret;
+}
