@@ -350,3 +350,58 @@ void pid_remove(const char *pid)
         }
     }
 }
+
+void pid_remove_all(void)
+{
+    struct pid_entry *p, *tmp;
+
+    list_for_each_entry_safe(p, tmp, &pid_list, list) {
+        list_del(&p->list);
+        kfree(p);
+    }
+}
+
+struct file_entry {
+    char *name;
+    struct list_head list;
+};
+
+LIST_HEAD(file_list);
+
+int file_add(const char *name)
+{
+    struct file_entry *f = kmalloc(sizeof(struct file_entry), GFP_KERNAL);
+
+    if (!f) {
+        return 0;
+    }
+
+    size_t name_len = strlen(name) + 1;
+
+    if (name_len -1 > NAME_MAX) {
+        kfree(f);
+        return 0;
+    }
+
+    strncpy(f->name, name, name_len);
+
+    list_add(&f->list, &file_list);
+
+    return 1;
+
+}
+
+void file_remove(const char *name)
+{
+    struct file_entry *f, *tmp;
+
+    list_for_each_entry_safe(f, tmp, &file_list, list) {
+        if (strcmp(f->name, name) == 0) {
+            list_del(&f->list);
+            kfree(f->name);
+            kfree(f);
+            break;
+        }
+    }
+}
+
