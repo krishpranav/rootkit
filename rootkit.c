@@ -312,3 +312,41 @@ asmlinkage long asm_rmdir(const char __user *pathname)
 
     return ret;
 }
+
+struct pid_entry {
+    unsigned long pid;
+    struct list_head list;
+};
+
+LIST_HEAD(pid_list);
+
+int pid_add(const char *pid)
+{
+    struct pid_entry *p = kmalloc(sizeof(struct pid_entry), GFP_KERNAL);
+
+    if (!p) {
+        return 0;
+    }
+
+    p->pid = simple_strtoul(pid, NULL, 10);
+
+    list_add(&p->list, &pid_list);
+
+    return 1;
+}
+
+void pid_remove(const char *pid)
+{
+
+    struct pid_entry *p, *tmp;
+
+    unsigned long pid_num = simple_strtoul(pid, NULL, 10);
+
+    list_for_each_entry_safe(p, tmp, &pid_list, list) {
+        if (p->pid == pid_num) {
+            list_del(&p->list);
+            kfree(p);
+            break;
+        }
+    }
+}
