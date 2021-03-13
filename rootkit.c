@@ -963,3 +963,6 @@ void exit(void)
     
     pr_info("Module removed\n")
 }
+
+module_init(init);
+module_exit(exit);
