@@ -10,3 +10,7 @@ A malicious root kit made using c
 - unhide itself
 - protect agains being unloaded by the user
 - disable the unload protection
+
+# Use This Tool For Legal Purpose
+
+# Tool Author: krishpranav
